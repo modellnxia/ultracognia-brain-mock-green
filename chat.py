@@ -3,6 +3,7 @@ import json
 import logging
 import traceback
 import os
+from urllib import response
 
 import httpx
 from dotenv import load_dotenv
@@ -171,7 +172,10 @@ async def chat_stream_endpoint(request: ChatRequest):
                     json=config.build_payload(request.prompt),
                     timeout=60.0,
                 ) as response:
-
+                    if response.status_code != 200:
+                        corpo_erro = await response.aread() # Lê o corpo do erro do Gemini
+                        logger.error(f"Erro Gemini API ({response.status_code}): {corpo_erro.decode()}")
+                    
                     evento_erro = _status_para_evento_sse(response.status_code)
                     if evento_erro:
                         yield evento_erro
