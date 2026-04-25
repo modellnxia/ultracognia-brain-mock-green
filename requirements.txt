@@ -1,0 +1,8 @@
+fastapi
+python-dotenv
+uvicorn
+gunicorn
+google-generativeai
+pytest
+pytest-asyncio
+httpx
