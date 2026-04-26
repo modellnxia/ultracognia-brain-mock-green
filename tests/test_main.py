@@ -20,20 +20,25 @@ def test_home_success(monkeypatch):
 def test_validar_acesso_forbidden(monkeypatch):
     monkeypatch.setenv("API_KEY", "secret123")
     
-    # Enviamos uma chave errada
-    response = client.get("/", headers={"x-api-key": "wrong_key"})
+    # 1. Acesse uma rota que EXIJA validação (NÃO pode ser "/", "/login" ou "/docs")
+    response = client.get("/prompt/conversations", headers={"x-api-key": "wrong_key"})
     
+    # 2. Agora o middleware deve cair na validação do token/key e retornar 403
     assert response.status_code == 403
     assert response.json() == {"detail": "Não autorizado"}
+
 
 # 3. Teste de Acesso sem Header (Middleware)
 def test_validar_acesso_no_header(monkeypatch):
     monkeypatch.setenv("API_KEY", "secret123")
     
-    # Não enviamos o header x-api-key
-    response = client.get("/")
+    # 1. Altere para uma rota protegida
+    response = client.get("/prompt/chat") 
     
-    assert response.status_code == 403
+    # 2. Agora o status deve ser o erro de autenticação (401 ou 403, conforme seu código)
+    # Se o seu código retorna 401 para token ausente, mude para 401 aqui
+    assert response.status_code == 403 
+
 
 # 4. Teste de API_KEY Vazia no ENV (Caso de borda)
 def test_validar_acesso_empty_env(monkeypatch):

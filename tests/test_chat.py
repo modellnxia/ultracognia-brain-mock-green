@@ -49,7 +49,21 @@ def test_gemini_config_validar_erro_url(monkeypatch):
 def test_gemini_config_build_payload(monkeypatch):
     monkeypatch.setenv("SYSTEM_PROMPT", "instrucao\\nquebra")
     config = GeminiConfig("URL")
-    payload = config.build_payload("meu prompt")
+    payload = config.build_payload("meu prompt", None)
+    assert "instrucao\nquebra" in payload["systemInstruction"]["parts"][0]["text"]
+    assert "meu prompt" == payload["contents"][0]["parts"][0]["text"]
+
+def test_gemini_config_build_payload_agente_1(monkeypatch):
+    monkeypatch.setenv("SYSTEM_PROMPT_1", "instrucao\\nquebra")
+    config = GeminiConfig("URL")
+    payload = config.build_payload("meu prompt", 1)
+    assert "instrucao\nquebra" in payload["systemInstruction"]["parts"][0]["text"]
+    assert "meu prompt" == payload["contents"][0]["parts"][0]["text"]
+
+def test_gemini_config_build_payload_agente_2(monkeypatch):
+    monkeypatch.setenv("SYSTEM_PROMPT_2", "instrucao\\nquebra")
+    config = GeminiConfig("URL")
+    payload = config.build_payload("meu prompt", 2)
     assert "instrucao\nquebra" in payload["systemInstruction"]["parts"][0]["text"]
     assert "meu prompt" == payload["contents"][0]["parts"][0]["text"]
 
@@ -73,7 +87,7 @@ def test_status_para_evento_sse():
 @pytest.mark.asyncio
 async def test_chat_endpoint_prompt_vazio():
     with pytest.raises(HTTPException) as exc:
-        await chat_endpoint(ChatRequest(prompt=" "))
+        await chat_endpoint(ChatRequest(prompt=" ", agente=None))
     assert exc.value.status_code == 422
 
 @pytest.mark.asyncio
@@ -90,7 +104,7 @@ async def test_chat_endpoint_sucesso(monkeypatch):
     }
 
     with patch("httpx.AsyncClient.post", AsyncMock(return_value=mock_resp)):
-        resp = await chat_endpoint(ChatRequest(prompt="oi"))
+        resp = await chat_endpoint(ChatRequest(prompt="oi", agente=None))
         assert resp["response"] == "Olá Mundo"
 
 @pytest.mark.asyncio
@@ -112,7 +126,7 @@ async def test_chat_endpoint_bloqueio_gemini(monkeypatch):
         
         with pytest.raises(HTTPException) as exc:
             from chat import chat_endpoint # Import local para garantir context
-            await chat_endpoint(ChatRequest(prompt="oi"))
+            await chat_endpoint(ChatRequest(prompt="oi", agente=None))
         
         assert exc.value.status_code == 422
         assert "bloqueado" in exc.value.detail
@@ -138,7 +152,7 @@ async def test_chat_endpoint_timeout(monkeypatch):
     # Se for api/prompt.py, use "api.prompt.httpx.AsyncClient"
     with patch("chat.httpx.AsyncClient", return_value=mock_client_instance):
         with pytest.raises(HTTPException) as exc:
-            await chat_endpoint(ChatRequest(prompt="oi"))
+            await chat_endpoint(ChatRequest(prompt="oi", agente=None))
         
         # Agora deve cair no except httpx.TimeoutException e retornar 504
         assert exc.value.status_code == 504
@@ -154,7 +168,7 @@ async def test_chat_stream_mock(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "123")
     monkeypatch.setenv("USAR_MOCK", "true")
 
-    response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+    response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
     chunks = []
     async for chunk in response.body_iterator:
         chunks.append(chunk)
@@ -168,16 +182,26 @@ async def test_chat_stream_error_status(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "123")
     monkeypatch.setenv("USAR_MOCK", "false")
 
-    # Simula erro 429 (Rate Limit) no stream
     mock_stream = MockStreamResponse(429, [])
-    
-    with patch("httpx.AsyncClient.stream", return_value=mock_stream):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock()
+    mock_client.stream = MagicMock(return_value=mock_stream)
+
+    with patch("chat.httpx.AsyncClient", return_value=mock_client):
+        req = ChatRequest(prompt="oi", agente=1)
+        response = await chat_stream_endpoint(req)
+
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)
-        assert any("event: error" in c for c in chunks)
-        assert any("Limite de requisições" in c for c in chunks)
+
+        texto_completo = "".join(chunks)
+
+        assert "event: error" in texto_completo
+        assert "Limite de requisições" in texto_completo
+
 
 @pytest.mark.asyncio
 async def test_chat_stream_exception_generica(monkeypatch):
@@ -192,7 +216,7 @@ async def test_chat_stream_exception_generica(monkeypatch):
     
     # 3. Aplicamos o patch na classe para garantir que o 'async with' a use
     with patch("httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         
         # 4. Ao iterar, o erro deve ser disparado ou capturado pelo log do seu código
         # Se o seu código tiver um try/except genérico dentro do 'gerar', 
@@ -220,7 +244,7 @@ async def test_chat_endpoint_erros_rede_especificos(monkeypatch, exception, expe
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(HTTPException) as exc:
-            await chat_endpoint(ChatRequest(prompt="oi"))
+            await chat_endpoint(ChatRequest(prompt="oi", agente=None))
         assert exc.value.status_code == expected_code
 
 @pytest.mark.asyncio
@@ -239,7 +263,7 @@ async def test_chat_endpoint_json_corrompido(monkeypatch):
 
     with patch("httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(HTTPException) as exc:
-            await chat_endpoint(ChatRequest(prompt="oi"))
+            await chat_endpoint(ChatRequest(prompt="oi", agente=None))
         assert exc.value.status_code == 502
         assert "Resposta inválida" in exc.value.detail
 
@@ -269,7 +293,7 @@ async def test_chat_stream_sucesso_completo(monkeypatch):
 
 # Patch no objeto 'httpx' que foi importado dentro do arquivo chat.py
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)
@@ -308,7 +332,7 @@ async def test_chat_endpoint_mock_retorno(monkeypatch):
 
     # 2. Chamamos o endpoint
     # Note que não precisamos de patch no httpx aqui, pois o código retorna ANTES de usar a rede
-    request_data = ChatRequest(prompt="olá")
+    request_data = ChatRequest(prompt="olá", agente=None)
     response = await chat_endpoint(request_data)
 
     # 3. Verificamos se o retorno é exatamente o texto do mock
@@ -336,7 +360,7 @@ async def test_chat_endpoint_estrutura_inesperada(monkeypatch):
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
         # 4. O teste deve capturar a HTTPException 502 (Resposta em formato inesperado)
         with pytest.raises(HTTPException) as exc:
-            await chat_endpoint(ChatRequest(prompt="oi"))
+            await chat_endpoint(ChatRequest(prompt="oi", agente=None))
 
         assert exc.value.status_code == 502
         assert "formato inesperado" in exc.value.detail
@@ -352,7 +376,7 @@ async def test_chat_endpoint_erro_generico_inesperado(monkeypatch):
     # Podemos fazer o próprio AsyncClient estourar ao ser instanciado.
     with patch("chat.httpx.AsyncClient", side_effect=Exception("Erro catastrófico")):
         with pytest.raises(HTTPException) as exc:
-            await chat_endpoint(ChatRequest(prompt="oi"))
+            await chat_endpoint(ChatRequest(prompt="oi", agente=None))
         
         # 3. Verifica se caiu no except Exception final (Status 500)
         assert exc.value.status_code == 500
@@ -361,7 +385,7 @@ async def test_chat_endpoint_erro_generico_inesperado(monkeypatch):
 @pytest.mark.asyncio
 async def test_chat_stream_endpoint_prompt_vazio():
     # 1. Criamos um request com prompt inválido (vazio ou só espaços)
-    request_invalido = ChatRequest(prompt="   ")
+    request_invalido = ChatRequest(prompt="   ", agente=None)
 
     # 2. Chamamos o endpoint de stream
     # O pytest deve capturar a HTTPException 422
@@ -394,7 +418,7 @@ async def test_chat_stream_ignora_linhas_invalidas(monkeypatch):
     mock_client.stream.return_value = mock_stream
 
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)
@@ -424,7 +448,7 @@ async def test_chat_stream_json_invalido_ignorado(monkeypatch):
     mock_client.stream.return_value = mock_stream
 
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)
@@ -452,7 +476,7 @@ async def test_chat_stream_conteudo_bloqueado(monkeypatch):
     mock_client.stream.return_value = mock_stream
 
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)
@@ -485,7 +509,7 @@ async def test_chat_stream_estrutura_chunk_invalida(monkeypatch):
     mock_client.stream.return_value = mock_stream
 
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)
@@ -515,7 +539,7 @@ async def test_chat_stream_erros_rede(monkeypatch, excecao, mensagem_esperada):
     mock_client.stream.side_effect = excecao
 
     with patch("chat.httpx.AsyncClient", return_value=mock_client):
-        response = await chat_stream_endpoint(ChatRequest(prompt="oi"))
+        response = await chat_stream_endpoint(ChatRequest(prompt="oi", agente=None))
         chunks = []
         async for chunk in response.body_iterator:
             chunks.append(chunk)

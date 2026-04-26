@@ -25,12 +25,12 @@ MOCK_TEXTO = (
 
 class ChatRequest(BaseModel):
     prompt: str
+    agente: int | None
 
 class GeminiConfig:
     def __init__(self, url_env: str):
         self.url         = os.getenv(url_env)
         self.key         = os.getenv("GEMINI_API_KEY")
-        self.system_prompt = os.getenv("SYSTEM_PROMPT", "").replace("\\n", "\n")
         self.usar_mock   = os.getenv("USAR_MOCK", "false").lower() == "true"
         self._url_env    = url_env
 
@@ -42,7 +42,13 @@ class GeminiConfig:
             logger.error("Variável GEMINI_API_KEY não configurada")
             raise HTTPException(status_code=500, detail="Serviço não configurado corretamente")
 
-    def build_payload(self, prompt: str) -> dict:
+    def build_payload(self, prompt: str, agente: int | None) -> dict:
+        if agente == 1:
+            self.system_prompt = os.getenv("SYSTEM_PROMPT_1", "").replace("\\n", "\n")
+        elif agente == 2:
+            self.system_prompt = os.getenv("SYSTEM_PROMPT_2", "").replace("\\n", "\n")
+        else:
+            self.system_prompt = os.getenv("SYSTEM_PROMPT", "").replace("\\n", "\n")
         return {
             "systemInstruction": {"parts": [{"text": self.system_prompt}]},
             "contents":          [{"parts": [{"text": prompt}]}],
@@ -66,12 +72,12 @@ def tratar_status_gemini(status_code: int, body_preview: str = "") -> None:
         logger.error("Gemini retornou erro interno: %s", status_code)
         raise HTTPException(status_code=502, detail="Serviço do Gemini indisponível")
 
-async def _call_gemini(client: httpx.AsyncClient, config: GeminiConfig, prompt: str) -> httpx.Response:
+async def _call_gemini(client: httpx.AsyncClient, config: GeminiConfig, prompt: str, agente: int | None) -> httpx.Response:
     try:
         return await client.post(
             f"{config.url}?key={config.key}",
             headers={"Content-Type": "application/json"},
-            json=config.build_payload(prompt),
+            json=config.build_payload(prompt, agente),
             timeout=60.0,
         )
     except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError):
@@ -91,7 +97,7 @@ async def chat_endpoint(request: ChatRequest):
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await _call_gemini(client, config, request.prompt)
+            response = await _call_gemini(client, config, request.prompt, request.agente)
 
         tratar_status_gemini(response.status_code, response.text[:200])
 
@@ -169,7 +175,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                     "POST",
                     f"{config.url}&key={config.key}",
                     headers={"Content-Type": "application/json"},
-                    json=config.build_payload(request.prompt),
+                    json=config.build_payload(request.prompt, request.agente),
                     timeout=60.0,
                 ) as response:
                     if response.status_code != 200:

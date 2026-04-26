@@ -22,6 +22,10 @@ app.add_middleware(GZipMiddleware, minimum_size=1000) #compacta acima de 1kb
 
 @app.middleware("http")
 async def validar_acesso(request: Request, call_next):
+    path = request.url.path
+    if path in ["/", "/docs", "/openapi.json"] or "login" in path:
+        return await call_next(request)
+        
     api_key = request.headers.get("x-api-key");
     API_KEY = os.getenv("API_KEY", "")
 
