@@ -12,3 +12,9 @@
 
 pkg/
 src/
+__pycache__/
+*.py[cod]
+venv/
+.env
+htmlcov/
+.coverage

@@ -1,0 +1,9 @@
+[run]
+omit =
+    */__init__.py
+    */config/*
+    */app/core/gerar_hash.py
+    */app/utils/migrate_db.py
+    */teste_conexao.py
+    */conftest.py
+    */tests/*
